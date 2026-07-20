@@ -1,0 +1,30 @@
+name: ttsd
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Core ML
+  - python=3.13
+
+  # Data / numerics
+  - numpy
+  - h5py
+  - scipy
+
+  # Configuration
+  - ruamel.yaml
+
+  # Visualization / monitoring
+  - matplotlib
+  - tensorboard
+
+  # Testing
+  - pip
+
+  - pip:
+    - --extra-index-url https://download.pytorch.org/whl/rocm7.2
+    - torch==2.12.1+rocm7.2
+    - torchvision==0.27.1+rocm7.2
+    - torchinfo
+    - parameterized

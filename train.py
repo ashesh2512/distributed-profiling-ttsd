@@ -26,7 +26,7 @@ from networks import vit
 
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
     torch.cuda.set_device(local_rank)
     device = torch.device("cuda:%d" % local_rank)
 
@@ -183,6 +183,12 @@ def train(params, args, local_rank, world_rank, world_size):
             tr_time += tr_end - tr_start
             dat_time += tr_start - dat_start
             step_count += 1
+
+            if world_rank == 0:
+                logging.info(
+                    "  [epoch %d, step %d] loss=%.6f, dt_data=%.3fs, dt_train=%.3fs",
+                    epoch + 1, i, loss.item() / world_size, tr_start - dat_start, tr_end - tr_start,
+                )
 
         torch.cuda.synchronize()  # device sync to ensure accurate epoch timings
         end = time.time()
@@ -357,7 +363,8 @@ if __name__ == "__main__":
     world_rank = 0
     local_rank = 0
     if params.distributed:
-        torch.distributed.init_process_group(backend="nccl", init_method="env://")
+        torch.distributed.init_process_group(backend="nccl", init_method="env://",
+                                             device_id=torch.device(f"cuda:{local_rank}"))
         world_rank = torch.distributed.get_rank()
         local_rank = int(os.environ["LOCAL_RANK"])
 
@@ -394,3 +401,5 @@ if __name__ == "__main__":
     if params.distributed:
         torch.distributed.barrier()
     logging.info("DONE ---- rank %d" % world_rank)
+    if params.distributed:
+        torch.distributed.destroy_process_group()
