@@ -1,0 +1,68 @@
+base: &base
+
+  # Model config
+  embed_dim: 384
+  depth: 12
+  dropout: 0.0
+  patch_size: 8
+  num_heads: 8
+  model_backend: 'pytorch'
+
+  # Training config
+  img_size: [360, 720]
+  dt: 1 
+  global_batch_size: 16 # number of samples per training batch
+  num_iters: 30000
+  amp_mode: none
+  enable_fused: false
+  enable_jit: false
+  expdir: '/lustre/orion/scratch/asharma/ven114/ttsd_multi_node/logs'
+  lr_schedule: 'cosine'
+  lr: 5E-4
+  warmup: 0
+  optimizer: 'Adam'
+
+  # Data
+  data_loader_config: 'pytorch'
+  num_data_workers: 0 # number of dataloader worker threads per proc
+  n_in_channels: 20
+  n_out_channels: 20
+  train_data_path:   '/lustre/orion/scratch/asharma/ven114/ttsd_data/train'
+  valid_data_path:   '/lustre/orion/scratch/asharma/ven114/ttsd_data/valid'
+  inf_data_path:     '/lustre/orion/scratch/asharma/ven114/ttsd_data/test'
+  global_means_path: '/lustre/orion/scratch/asharma/ven114/ttsd_data/stats/global_means.npy'
+  global_stds_path:  '/lustre/orion/scratch/asharma/ven114/ttsd_data/stats/global_stds.npy'
+  limit_nsamples: None
+  limit_nsamples_val: None
+
+  # Comms
+  wireup_info: env
+  wireup_store: tcp
+
+# limit the number of samples
+single_gpu:
+  <<: *base
+  limit_nsamples: 512
+  limit_nsamples_val: 128
+  num_iters: 128
+  num_data_workers: 8
+
+# ----- Data parallel scaling configs
+data_parallel:
+  <<: *base
+  global_batch_size: 64
+  limit_nsamples: 2048
+  limit_nsamples_val: 2048
+  num_data_workers: 4
+  num_iters: 128
+  lr: 1e-3
+
+model_parallel:
+  <<: *base
+  global_batch_size: 64
+  limit_nsamples: 2048
+  limit_nsamples_val: 2048
+  num_data_workers: 7
+  num_iters: 32
+  lr: 1e-3
+  embed_dim: 1024 # change to bigger model
