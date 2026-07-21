@@ -123,7 +123,8 @@ def init_process_group():
 
         # initialize process groups
         dist.init_process_group(
-            backend="nccl", rank=world_rank, world_size=world_size, store=store
+            backend="nccl", rank=world_rank, world_size=world_size, store=store,
+            device_id=torch.device(f"cuda:{local_rank}")
         )
 
 

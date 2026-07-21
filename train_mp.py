@@ -3,7 +3,6 @@ import os
 import time
 import numpy as np
 import argparse
-import pynvml
 
 import torch
 import torch.nn as nn
@@ -26,7 +25,6 @@ from utils import comm
 from utils.loss import l2_loss, l2_loss_opt
 from utils.metrics import weighted_rmse
 from networks import vit
-from networks import vit_te
 
 from distributed.mappings import init_ddp_model_and_reduction_hooks
 from distributed.helpers import init_params_for_shared_weights
@@ -36,13 +34,9 @@ from utils.plots import generate_images
 
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
     torch.cuda.set_device(local_rank)
     device = torch.device("cuda:%d" % local_rank)
-
-    # init pynvml and get handle
-    pynvml.nvmlInit()
-    nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
 
     # get data loader
     logging.info("rank %d, begin data loader init" % world_rank)
@@ -56,6 +50,7 @@ def train(params, args, local_rank, world_rank, world_size):
 
     # create model
     if params.model_backend == 'transformer-engine':
+        from networks import vit_te
         logging.info("using transformer-engine backend")
         model = vit_te.ViT(params).to(device)
     else:  
@@ -88,10 +83,6 @@ def train(params, args, local_rank, world_rank, world_size):
 
     if world_rank == 0:
         logging.info(model)
-        all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (
-            1024.0 * 1024.0 * 1024.0
-        )
-        logging.info(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
 
     iters = 0
     startEpoch = 0
@@ -189,12 +180,6 @@ def train(params, args, local_rank, world_rank, world_size):
                 loss = loss_func(gen, tar)
             torch.cuda.nvtx.range_pop()  # forward
 
-            if world_rank == 0 and i == 1:  # print the mem used
-                all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (
-                    1024.0 * 1024.0 * 1024.0
-                )
-                logging.info(f" Memory usage after forward pass: {all_mem_gb} GB.")
-
             if params.amp_dtype == torch.float16:
                 scaler.scale(loss).backward()
                 torch.cuda.nvtx.range_push(f"optimizer")
@@ -221,6 +206,12 @@ def train(params, args, local_rank, world_rank, world_size):
             tr_time += tr_end - tr_start
             dat_time += tr_start - dat_start
             step_count += 1
+
+            if world_rank == 0:
+                logging.info(
+                    "  [epoch %d, step %d] loss=%.6f, dt_data=%.3fs, dt_train=%.3fs",
+                    epoch + 1, i, loss.item(), tr_start - dat_start, tr_end - tr_start,
+                )
 
         torch.cuda.synchronize()  # device sync to ensure accurate epoch timings
         end = time.time()
@@ -285,7 +276,6 @@ def train(params, args, local_rank, world_rank, world_size):
     torch.cuda.synchronize()
     t2 = time.time()
     tottime = t2 - t1
-    pynvml.nvmlShutdown()
 
 
 if __name__ == "__main__":
@@ -463,3 +453,5 @@ if __name__ == "__main__":
     if params.distributed:
         torch.distributed.barrier()
     logging.info("DONE ---- rank %d" % world_rank)
+    if params.distributed:
+        torch.distributed.destroy_process_group()
