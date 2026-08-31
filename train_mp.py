@@ -31,6 +31,15 @@ from distributed.helpers import init_params_for_shared_weights
 
 from utils.plots import generate_images
 
+# profiling
+from torch.profiler import (
+  profile,
+  ProfilerActivity,
+  record_function,
+  schedule,
+  tensorboard_trace_handler,
+)
+
 
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
@@ -140,6 +149,28 @@ def train(params, args, local_rank, world_rank, world_size):
 
     params.num_epochs = params.num_iters // len(train_data_loader)
     iters = 0
+
+    # one .pt.trace.json.gz per rank: loads in TensorBoard (torch-tb-profiler) and in Perfetto
+    prof = None
+    if params.get("enable_torch_profiler", False):
+      trace_dir = os.path.join(os.environ["lus_dir"], "torch_trace")
+      prof = profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        schedule=schedule(wait=5, warmup=2, active=3, repeat=1),
+        on_trace_ready=tensorboard_trace_handler(trace_dir),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=False,
+      )
+      prof.start()
+
+    # allocator event history for https://pytorch.org/memory_viz (independent of the torch profiler)
+    snapshot_dir = None
+    if params.get("enable_memory_snapshot", False):
+      snapshot_dir = os.path.join(os.environ["lus_dir"], "mem_snapshot")
+      os.makedirs(snapshot_dir, exist_ok=True)
+      torch.cuda.memory._record_memory_history(max_entries=100000)
+
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
         torch.cuda.synchronize()  # device sync to ensure accurate epoch timings
@@ -213,6 +244,9 @@ def train(params, args, local_rank, world_rank, world_size):
                     epoch + 1, i, loss.item(), tr_start - dat_start, tr_end - tr_start,
                 )
 
+            if prof:
+              prof.step()
+
         torch.cuda.synchronize()  # device sync to ensure accurate epoch timings
         end = time.time()
 
@@ -272,6 +306,24 @@ def train(params, args, local_rank, world_rank, world_size):
                 "RMSE(u10m)/valid", val_rmse.cpu().numpy()[0], iters
             )
             args.tboard_writer.flush()
+
+    if snapshot_dir:
+      snapshot_file = os.path.join(snapshot_dir, "mem_snapshot_%d.pickle" % world_rank)
+      torch.cuda.memory._dump_snapshot(snapshot_file)
+      torch.cuda.memory._record_memory_history(enabled=None)
+      logging.info("memory snapshot written to %s", snapshot_file)
+      
+    if prof:
+      prof.stop()
+      if world_rank == 0:
+        # compute kernels, memcpys and rccl collectives, ranked by GPU time
+        logging.info(
+          "Top GPU kernels:\n%s",
+          prof.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=25, max_name_column_width=80
+          ),
+        )
+        logging.info("torch profiler trace written to %s", trace_dir)
 
     torch.cuda.synchronize()
     t2 = time.time()
