@@ -1,5 +1,9 @@
 base: &base
 
+  # profiling
+  enable_torch_profiler: true # do not combine with rocprofv3/nsys
+  enable_memory_snapshot: false
+
   # Model config
   embed_dim: 384
   depth: 12
@@ -16,7 +20,7 @@ base: &base
   amp_mode: none
   enable_fused: false
   enable_jit: false
-  expdir: '/lustre/orion/scratch/asharma/ven114/ttsd_multi_node/logs'
+  expdir: '${lus_dir}/logs'
   lr_schedule: 'cosine'
   lr: 5E-4
   warmup: 0
@@ -45,7 +49,7 @@ single_gpu:
   limit_nsamples: 512
   limit_nsamples_val: 128
   num_iters: 128
-  num_data_workers: 8
+  num_data_workers: 4
 
 # ----- Data parallel scaling configs
 data_parallel:
@@ -54,15 +58,16 @@ data_parallel:
   limit_nsamples: 2048
   limit_nsamples_val: 2048
   num_data_workers: 4
-  num_iters: 128
+  num_iters: 32
   lr: 1e-3
+  embed_dim: 1024 # change to bigger model
 
 model_parallel:
   <<: *base
   global_batch_size: 64
   limit_nsamples: 2048
   limit_nsamples_val: 2048
-  num_data_workers: 7
+  num_data_workers: 4
   num_iters: 32
   lr: 1e-3
   embed_dim: 1024 # change to bigger model

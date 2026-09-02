@@ -159,7 +159,7 @@ def train(params, args, local_rank, world_rank, world_size):
         schedule=schedule(wait=5, warmup=2, active=3, repeat=1),
         on_trace_ready=tensorboard_trace_handler(trace_dir),
         record_shapes=True,
-        profile_memory=True,
+        profile_memory=False,
         with_stack=False,
       )
       prof.start()
@@ -485,7 +485,7 @@ if __name__ == "__main__":
     params.data_shard_id = comm.get_rank("dp")
 
     # Set up directory
-    baseDir = params.expdir
+    baseDir = os.path.expandvars(params.expdir)
     expDir = os.path.join(
         baseDir, args.config + "/%dMP/" % (comm.get_size("tp-cp")) + str(run_num) + "/"
     )
